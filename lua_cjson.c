@@ -461,7 +461,7 @@ static void json_encode_exception(lua_State *l, json_config_t *cfg, strbuf_t *js
  * - String (Lua stack index)
  *
  * Returns nothing. Doesn't remove string from Lua stack */
-static void json_append_string(lua_State *l, strbuf_t *json, int lindex)
+static void json_append_string(lua_State *l, json_config_t *cfg, strbuf_t *json, int lindex)
 {
     const char *escstr;
     int i;
@@ -469,7 +469,9 @@ static void json_append_string(lua_State *l, strbuf_t *json, int lindex)
     size_t len;
 
     str = lua_tolstring(l, lindex, &len);
-
+    if (*str == '^'){
+        json_encode_exception(l, cfg, json, lindex, "string value cannot start with ^");
+    }
     /* Worst case is len * 6 (all unicode escapes).
      * This buffer is reused constantly for small strings
      * If there are any excess pages, they won't be hit anyway.
@@ -654,10 +656,11 @@ static void json_append_object(lua_State *l, json_config_t *cfg,
         keytype = lua_type(l, -2);
         if (keytype == LUA_TNUMBER) {
             strbuf_append_char(json, '"');
+            strbuf_append_char(json, '^');
             json_append_number(l, cfg, json, -2);
             strbuf_append_mem(json, "\":", 2);
         } else if (keytype == LUA_TSTRING) {
-            json_append_string(l, json, -2);
+            json_append_string(l, cfg, json, -2);
             strbuf_append_char(json, ':');
         } else {
             json_encode_exception(l, cfg, json, -2,
@@ -682,7 +685,7 @@ static void json_append_data(lua_State *l, json_config_t *cfg,
 
     switch (lua_type(l, -1)) {
     case LUA_TSTRING:
-        json_append_string(l, json, -1);
+        json_append_string(l, cfg, json, -1);
         break;
     case LUA_TNUMBER:
         json_append_number(l, cfg, json, -1);
@@ -1178,8 +1181,13 @@ static void json_parse_object_context(lua_State *l, json_parse_t *json)
             json_throw_parse_error(l, json, "object key string", &token);
 
         /* Push key */
-        lua_pushlstring(l, token.value.string, token.string_len);
-
+        if (*(token.value.string) == '^'){
+                char *endptr;
+                double t = fpconv_strtod(token.value.string+1, &endptr);
+                lua_pushnumber(l, t);
+        } else {
+            lua_pushlstring(l, token.value.string, token.string_len);
+        }
         json_next_token(json, &token);
         if (token.type != T_COLON)
             json_throw_parse_error(l, json, "colon", &token);
@@ -1427,7 +1435,7 @@ static int lua_cjson_safe_new(lua_State *l)
     return 1;
 }
 
-int luaopen_cjson(lua_State *l)
+int luaopen_cjsondb(lua_State *l)
 {
     lua_cjson_new(l);
 
@@ -1441,7 +1449,7 @@ int luaopen_cjson(lua_State *l)
     return 1;
 }
 
-int luaopen_cjson_safe(lua_State *l)
+int luaopen_cjsondb_safe(lua_State *l)
 {
     lua_cjson_safe_new(l);
 
